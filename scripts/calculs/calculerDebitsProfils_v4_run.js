@@ -591,30 +591,6 @@ async function calculerParclosesDepuisProfils(profils, contexte) {
     return best;
   }
 
-  function resolveCellZoneFromBounds(x0, x1, contexte) {
-    const W = contexte.LARGEUR_BAIE || 0;
-    const Lg = contexte.LARGEUR_FIXE_G || 0;
-    const Lp = contexte.LARGEUR_PASSAGE || 0;
-
-    if (x0 <= 0 + TOL && x1 <= Lg + TOL) return "FIXE_G";
-    if (x0 >= Lg + Lp - TOL && x1 <= W + TOL) return "FIXE_D";
-    return "BAIE";
-  }
-
-  function zoneBounds(zoneLabel, contexte) {
-    const W = contexte.LARGEUR_BAIE || 0;
-    const Lg = contexte.LARGEUR_FIXE_G || 0;
-    const Lp = contexte.LARGEUR_PASSAGE || 0;
-
-    switch (zoneLabel) {
-      case "FIXE_G":
-        return { xMin: 0, xMax: Lg };
-      case "FIXE_D":
-        return { xMin: Lg + Lp, xMax: W };
-      default:
-        return { xMin: 0, xMax: W };
-    }
-  }
 
   // ---- pile rive (montant+closoir) pour horizontales
   async function epPileRive(zoneLabel, side /*G|D*/) {
@@ -676,13 +652,7 @@ async function calculerParclosesDepuisProfils(profils, contexte) {
     const any = pB || pH || pG || pD;
     if (!any) continue;
 
-    const baseZoneLabel = normLabel(getChoiceLabel(any, "crbee_zone"), "BAIE");
-    const x0Cell = pB?.crbee_positionmmdebut ?? pH?.crbee_positionmmdebut ?? pG?.crbee_positionmm ?? 0;
-    const x1Cell = pB?.crbee_positionmmfin ?? pH?.crbee_positionmmfin ?? pD?.crbee_positionmm ?? x0Cell;
-    const zoneLabel = baseZoneLabel === "BAIE"
-      ? resolveCellZoneFromBounds(x0Cell, x1Cell, contexte)
-      : baseZoneLabel;
-    const bounds = zoneBounds(zoneLabel, contexte);
+    const Wbaie = contexte.LARGEUR_BAIE || 0;
     const Hzone = contexte.HAUTEUR_BAIE || 0;
 
     // (A) Horizontales
@@ -693,16 +663,18 @@ async function calculerParclosesDepuisProfils(profils, contexte) {
       const base = fin - deb;
 
       let epG = 0;
-      if (Math.abs(deb - bounds.xMin) <= TOL) epG = await getPile(zoneLabel, "G");
-      else {
-        const m = zoneLabel === "BAIE" ? findMontantAtAnyZone(deb) : findMontantAt(zoneLabel, deb);
+      if (Math.abs(deb - 0) <= TOL) {
+        epG = await getPile("BAIE", "G");
+      } else {
+        const m = findMontantAtAnyZone(deb);
         epG = m ? (await getEpIntProduit(m._crbee_profil_value)) / 2 : 0;
       }
 
       let epD = 0;
-      if (Math.abs(fin - bounds.xMax) <= TOL) epD = await getPile(zoneLabel, "D");
-      else {
-        const m = zoneLabel === "BAIE" ? findMontantAtAnyZone(fin) : findMontantAt(zoneLabel, fin);
+      if (Math.abs(fin - Wbaie) <= TOL) {
+        epD = await getPile("BAIE", "D");
+      } else {
+        const m = findMontantAtAnyZone(fin);
         epD = m ? (await getEpIntProduit(m._crbee_profil_value)) / 2 : 0;
       }
 
@@ -729,20 +701,16 @@ async function calculerParclosesDepuisProfils(profils, contexte) {
       let base = (y1 - y0);
 
       if (Math.abs(y0 - 0) <= TOL) {
-        base -= await getCadreHor(zoneLabel, "_B");
+        base -= await getCadreHor("BAIE", "_B");
       } else {
-        const t0 = zoneLabel === "BAIE"
-          ? findTraverseAtAnyZone(y0, x)
-          : findTraverseAt(zoneLabel, y0, x);
+        const t0 = findTraverseAtAnyZone(y0, x);
         if (t0) base -= (await getEpIntProduit(t0._crbee_profil_value)) / 2;
       }
 
       if (Math.abs(y1 - Hzone) <= TOL) {
-        base -= await getCadreHor(zoneLabel, "_H");
+        base -= await getCadreHor("BAIE", "_H");
       } else {
-        const t1 = zoneLabel === "BAIE"
-          ? findTraverseAtAnyZone(y1, x)
-          : findTraverseAt(zoneLabel, y1, x);
+        const t1 = findTraverseAtAnyZone(y1, x);
         if (t1) base -= (await getEpIntProduit(t1._crbee_profil_value)) / 2;
       }
 
