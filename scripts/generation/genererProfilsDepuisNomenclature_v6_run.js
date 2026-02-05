@@ -726,51 +726,74 @@ const commandeProductionId = chassisRecWithCommande._crbee_commandeproduction_va
 
   const yImposte = traversesBaie.length ? traversesBaie[0] : null;
 
-  // --- 2) Y-cuts = toutes les traverses + bords
-  const Ys = [0, H];
-  for (const z of Object.keys(traversesEntitiesByZoneLabel)) {
-    for (const t of (traversesEntitiesByZoneLabel[z] || [])) {
-      if (t && typeof t.crbee_positionmm === "number") Ys.push(t.crbee_positionmm);
+  // --- 2) Index traverses avec portée X ABS pour découper les vitrages par zone
+  const traverseCuts = [];
+  for (const zLabel of Object.keys(traversesEntitiesByZoneLabel)) {
+    const z = normalizeZoneLabelForWidth(zLabel);
+    const offX = zoneOffsetX(contexte, z);
+    const Lz = zoneLargeur(contexte, z);
+
+    for (const t of (traversesEntitiesByZoneLabel[zLabel] || [])) {
+      const y = t?.crbee_positionmm;
+      if (typeof y !== "number") continue;
+
+      const x0Local = t.crbee_positionmmdebut ?? 0;
+      const x1Local = t.crbee_positionmmfin ?? Lz;
+      const x0 = offX + x0Local;
+      const x1 = offX + x1Local;
+
+      if (x1 <= x0 + TOL) continue;
+      traverseCuts.push({ y, x0, x1 });
     }
   }
-  const Y = uniqSorted(Ys).filter(y => y >= 0 - TOL && y <= H + TOL);
 
-  // --- 3) Intervalles X selon bande
-  function intervalsForBand(y0, y1) {
-    const W  = contexte.LARGEUR_BAIE || 0;
-    const Lg = contexte.LARGEUR_FIXE_G || 0;
-    const Lp = contexte.LARGEUR_PASSAGE || 0;
+  function yCutsForInterval(ix0, ix1, yMin, yMax) {
+    const Ys = [yMin, yMax];
+    for (const t of traverseCuts) {
+      if (t.y <= yMin + TOL || t.y >= yMax - TOL) continue;
+      const overlaps = (t.x0 < ix1 - TOL) && (t.x1 > ix0 + TOL);
+      if (overlaps) Ys.push(t.y);
+    }
+    return uniqSorted(Ys).filter(y => y >= yMin - TOL && y <= yMax + TOL);
+  }
 
-    // ✅ 1) Si on est dans la zone imposte (au-dessus de la traverse imposte) :
-    // vitrage pleine largeur BAIE (comme avant)
-    if (yImposte !== null && y0 >= yImposte - TOL) {
-      return [{ x0: 0, x1: W }];
+  // --- 3) Intervalles X par zone + plage Y (pour éviter qu'une traverse locale coupe toute la BAIE)
+  const intervalSpecs = [];
+
+  const xA0 = 0,       xA1 = Lg;     // FIXE_G
+  const xB0 = Lg + Lp, xB1 = W;      // FIXE_D
+
+  if (yImposte !== null) {
+    if (yImposte > 0 + TOL) {
+      if (xA1 > xA0 + TOL) intervalSpecs.push({ x0: xA0, x1: xA1, yMin: 0, yMax: yImposte });
+      if (xB1 > xB0 + TOL) intervalSpecs.push({ x0: xB0, x1: xB1, yMin: 0, yMax: yImposte });
     }
 
-    // ✅ 2) Sinon (en dessous de l’imposte, ou pas d’imposte) :
-    // vitrages uniquement sur les FIXES (jamais dans PASSAGE)
-    const xA0 = 0,       xA1 = Lg;     // FIXE_G
-    const xB0 = Lg + Lp, xB1 = W;      // FIXE_D
-
-    const res = [];
-    if (xA1 > xA0 + TOL) res.push({ x0: xA0, x1: xA1 }); // FIXE_G si existe
-    if (xB1 > xB0 + TOL) res.push({ x0: xB0, x1: xB1 }); // FIXE_D si existe
-    return res;
+    if (yImposte < H - TOL) {
+      intervalSpecs.push({ x0: 0, x1: W, yMin: yImposte, yMax: H });
+    }
+  } else {
+    if (xA1 > xA0 + TOL) intervalSpecs.push({ x0: xA0, x1: xA1, yMin: 0, yMax: H });
+    if (xB1 > xB0 + TOL) intervalSpecs.push({ x0: xB0, x1: xB1, yMin: 0, yMax: H });
   }
 
   let idx = 0;
 
-  for (let j = 0; j < Y.length - 1; j++) {
-    const y0 = Y[j];
-    const y1 = Y[j + 1];
-    if (y1 <= y0 + TOL) continue;
+  for (const spec of intervalSpecs) {
+    const ix0 = spec.x0;
+    const ix1 = spec.x1;
+    const yMin = spec.yMin;
+    const yMax = spec.yMax;
 
-    const intervals = intervalsForBand(y0, y1);
-    if (!intervals.length) continue;
+    if (ix1 <= ix0 + TOL || yMax <= yMin + TOL) continue;
 
-    for (const interval of intervals) {
-      const ix0 = interval.x0;
-      const ix1 = interval.x1;
+    const Y = yCutsForInterval(ix0, ix1, yMin, yMax);
+    if (Y.length < 2) continue;
+
+    for (let j = 0; j < Y.length - 1; j++) {
+      const y0 = Y[j];
+      const y1 = Y[j + 1];
+      if (y1 <= y0 + TOL) continue;
 
       // X-cuts = montants qui traversent la bande ET qui sont dans l’intervalle
       const xCuts = uniqSorted(
